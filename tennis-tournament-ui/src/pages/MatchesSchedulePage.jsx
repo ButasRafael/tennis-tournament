@@ -28,10 +28,13 @@ function MatchesSchedulePage() {
     const [matches, setMatches] = useState([]);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'error' });
     const storedUser = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')) : null;
+    const userId = storedUser ? Number(storedUser.id) : null;
 
     useEffect(() => {
         axiosInstance.get('/tournaments/all')
-            .then(response => setTournaments(response.data))
+            .then(response => {
+                setTournaments(response.data);
+            })
             .catch(error => {
                 setSnackbar({ open: true, message: 'Error fetching tournaments: ' + (error.response?.data || error.message), severity: 'error' });
             });
@@ -45,8 +48,7 @@ function MatchesSchedulePage() {
         axiosInstance.get(`/matches/tournament/${selectedTournament}`)
             .then(response => {
                 const playerMatches = response.data.filter(match =>
-                    (match.player1 && match.player1.id === storedUser.id) ||
-                    (match.player2 && match.player2.id === storedUser.id)
+                    match.player1 === userId || match.player2 === userId
                 );
                 setMatches(playerMatches);
             })
@@ -82,7 +84,13 @@ function MatchesSchedulePage() {
                             ))}
                         </Select>
                     </FormControl>
-                    <Button variant="contained" color="primary" onClick={fetchMatches} startIcon={<VisibilityIcon />} sx={{ mt: 2 }}>
+                    <Button
+                        variant="contained"
+                        color="primary"
+                        onClick={fetchMatches}
+                        startIcon={<VisibilityIcon />}
+                        sx={{ mt: 2 }}
+                    >
                         View Schedule
                     </Button>
                     {matches.length === 0 ? (
@@ -104,8 +112,8 @@ function MatchesSchedulePage() {
                                     {matches.map(match => (
                                         <TableRow key={match.id}>
                                             <TableCell>{match.id}</TableCell>
-                                            <TableCell>{match.player1 ? match.player1.username : 'N/A'}</TableCell>
-                                            <TableCell>{match.player2 ? match.player2.username : 'N/A'}</TableCell>
+                                            <TableCell>{match.player1}</TableCell>
+                                            <TableCell>{match.player2}</TableCell>
                                             <TableCell>{match.score || 'N/A'}</TableCell>
                                             <TableCell>{match.startTime}</TableCell>
                                             <TableCell>{match.endTime}</TableCell>
