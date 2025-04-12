@@ -60,16 +60,6 @@ This repository contains the **Spring Boot** backend (Java 17) and a **React (MU
 
 ## Running the Application
 
-### MySQL Setup
-```bash
-docker run -p 3306:3306 \
-  -e MYSQL_DATABASE=tennis_db \
-  -e MYSQL_USER=Admin \
-  -e MYSQL_PASSWORD=adminpass \
-  -e MYSQL_ROOT_PASSWORD=rootpass \
-  -d mysql:latest
-```
-
 ### Backend (Spring Boot)
 ```bash
 mvn clean install
