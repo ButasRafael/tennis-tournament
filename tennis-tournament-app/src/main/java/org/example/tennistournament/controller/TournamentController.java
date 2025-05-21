@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.tennistournament.model.Tournament;
+import org.example.tennistournament.model.RegistrationRequest;
 import org.example.tennistournament.service.TournamentService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -58,26 +59,25 @@ public class TournamentController {
     }
 
     @PostMapping("/{tournamentId}/register")
-    @PreAuthorize("hasRole('PLAYER')")
+    @PreAuthorize("#playerId == principal.id and hasRole('PLAYER')")   // ← tighten to self
     @Operation(summary = "Register player", description = "Registers a player to a tournament")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Player registered successfully"),
-            @ApiResponse(responseCode = "400", description = "Registration failed due to tournament rules or deadline")
-    })
     public ResponseEntity<?> registerPlayer(
             @Parameter(description = "Tournament ID", required = true) @PathVariable Long tournamentId,
             @Parameter(description = "Player ID", required = true) @RequestParam Long playerId
     ) {
         try {
-            Tournament tournament = tournamentService.registerPlayer(tournamentId, playerId);
-            return ResponseEntity.ok(tournament);
+            RegistrationRequest req = tournamentService.registerPlayer(tournamentId, playerId);
+            return ResponseEntity.ok(req);
         } catch (RuntimeException ex) {
             Sentry.captureException(ex);
-            return ResponseEntity.badRequest().body(ex.getMessage());
+            return ResponseEntity
+                    .badRequest()
+                    .body(ex.getMessage());
         }
     }
 
     @GetMapping("/all")
+    @PreAuthorize("isAuthenticated()")
     @Operation(summary = "Get all tournaments", description = "Retrieves a list of all tournaments")
     @ApiResponse(responseCode = "200", description = "Tournaments retrieved successfully")
     public ResponseEntity<?> getAllTournaments() {

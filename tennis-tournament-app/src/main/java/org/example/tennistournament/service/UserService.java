@@ -9,11 +9,13 @@ import org.example.tennistournament.repository.TennisMatchRepository;
 import org.example.tennistournament.repository.UserRepository;
 import org.example.tennistournament.repository.TournamentRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -67,6 +69,7 @@ public class UserService {
 //        return user;
 //    }
 
+    @PreAuthorize("#userId == principal.id or hasRole('ADMIN')")  // ← only self or admin
     public User updateUser(Long userId, String newUsername, String newEmail, String newPassword) {
         try {
             User user = userRepository.findById(userId)
@@ -99,11 +102,13 @@ public class UserService {
         }
     }
 
+    @PreAuthorize("#id == principal.id or hasRole('ADMIN')")  // ← only self or admin
     public User getUserById(Long id) {
         return userRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("User not found!"));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     public List<User> getAllUsers() {
         return userRepository.findAll();
     }
@@ -145,6 +150,28 @@ public class UserService {
         if (caller.getRole() != Role.ADMIN) {
             throw new RuntimeException("Access denied: You are not an admin!");
         }
+    }
+
+    public List<User> filterPlayers(String usernamePart, Long tournamentId) {
+        // start with everyone who is a PLAYER
+        List<User> players = userRepository.findAllByRole(Role.PLAYER);
+
+        if (usernamePart != null && !usernamePart.isBlank()) {
+            String lc = usernamePart.toLowerCase();
+            players = players.stream()
+                    .filter(u -> u.getUsername().toLowerCase().contains(lc))
+                    .collect(Collectors.toList());
+        }
+
+        if (tournamentId != null) {
+            Tournament t = tournamentRepository.findById(tournamentId)
+                    .orElseThrow(() -> new RuntimeException("Tournament not found: " + tournamentId));
+            players = players.stream()
+                    .filter(t.getPlayers()::contains)
+                    .collect(Collectors.toList());
+        }
+
+        return players;
     }
 
 }

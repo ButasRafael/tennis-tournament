@@ -55,6 +55,7 @@ public class TennisMatchController {
     }
 
     @GetMapping("/tournament/{tournamentId}")
+    @PreAuthorize("@tennisMatchService.isParticipantOrAdmin(#tournamentId, principal.id)")
     @Operation(summary = "Get matches by tournament", description = "Retrieves all matches associated with a tournament")
     @ApiResponse(responseCode = "200", description = "Matches retrieved successfully")
     public ResponseEntity<?> getMatchesByTournament(
@@ -67,10 +68,11 @@ public class TennisMatchController {
             Sentry.captureException(ex);
             return ResponseEntity.badRequest().body(ex.getMessage());
         }
+
     }
 
     @GetMapping("/referee/{refereeId}")
-    @PreAuthorize("hasRole('REFEREE')")
+    @PreAuthorize("#refereeId == principal.id or hasRole('ADMIN')")
     @Operation(summary = "Get matches by referee", description = "Retrieves matches assigned to a specific referee")
     @ApiResponse(responseCode = "200", description = "Matches retrieved successfully")
     public ResponseEntity<?> getMatchesByReferee(
@@ -86,7 +88,7 @@ public class TennisMatchController {
     }
 
     @PutMapping("/{matchId}/score")
-    @PreAuthorize("hasRole('REFEREE')")
+    @PreAuthorize("hasRole('ADMIN') or (hasRole('REFEREE') and @tennisMatchService.isRefereeOfMatch(#matchId, principal.id))")
     @Operation(summary = "Update match score", description = "Updates the score for a match; only the assigned referee or ADMIN can update within valid time limits")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Score updated successfully"),

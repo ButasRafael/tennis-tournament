@@ -10,6 +10,7 @@ import org.example.tennistournament.repository.TennisMatchRepository;
 import org.example.tennistournament.repository.TournamentRepository;
 import org.example.tennistournament.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +32,7 @@ public class TennisMatchService {
     @Autowired
     private UserRepository userRepository;
 
+    @PreAuthorize("hasRole('ADMIN')")
     public TennisMatch createMatch(Long tournamentId,
                                    Long player1Id,
                                    Long player2Id,
@@ -106,14 +108,17 @@ public class TennisMatchService {
         }
     }
 
+    @PreAuthorize("@tennisMatchService.isParticipantOrAdmin(#tournamentId, principal.id)")
     public List<TennisMatch> getMatchesByTournament(Long tournamentId) {
         return tennisMatchRepository.findByTournamentId(tournamentId);
     }
 
+    @PreAuthorize("#refereeId == principal.id or hasRole('ADMIN')")
     public List<TennisMatch> getMatchesByReferee(Long refereeId) {
         return tennisMatchRepository.findByRefereeId(refereeId);
     }
 
+    @PreAuthorize("hasRole('ADMIN') or (hasRole('REFEREE') and @tennisMatchService.isRefereeOfMatch(#matchId, principal.id))")
     public TennisMatch updateMatchScore(Long matchId, String newScore, Long currentUserId) {
         try {
             TennisMatch match = tennisMatchRepository.findById(matchId)
@@ -122,17 +127,17 @@ public class TennisMatchService {
             User currentUser = userRepository.findById(currentUserId)
                     .orElseThrow(() -> new RuntimeException("Current user not found!"));
 
-            if (currentUser.getRole() == Role.ADMIN) {
-            } else if (currentUser.getRole() == Role.REFEREE) {
+            if (currentUser.getRole() == Role.REFEREE) {
                 if (!match.getReferee().getId().equals(currentUser.getId())) {
                     throw new RuntimeException("You are not the assigned referee for this match!");
                 }
                 LocalDateTime now = LocalDateTime.now();
-                if(now.isBefore(match.getStartTime()) || now.isAfter(match.getEndTime())) {
+                if (now.isBefore(match.getStartTime()) || now.isAfter(match.getEndTime())) {
                     throw new RuntimeException("Cannot update score outside of match time!");
                 }
-            } else {
-                throw new RuntimeException("Players cannot update match scores!");
+            }
+            else if (currentUser.getRole() != Role.ADMIN) {
+                throw new RuntimeException("Only ADMIN or the assigned referee can update match scores!");
             }
 
             Tournament t = match.getTournament();
@@ -150,5 +155,21 @@ public class TennisMatchService {
         } catch (OptimisticLockException ex) {
             throw new RuntimeException("Match was concurrently updated, please refresh!");
         }
+    }
+
+    public boolean isParticipantOrAdmin(Long tournamentId, Long userId) {
+        if (userRepository.findById(userId)
+                .map(u -> u.getRole() == Role.ADMIN).orElse(false)) {
+            return true;
+        }
+        return tournamentRepository.findById(tournamentId)
+                .map(t -> t.getPlayers().stream()
+                        .anyMatch(p -> p.getId().equals(userId)))
+                .orElse(false);
+    }
+    public boolean isRefereeOfMatch(Long matchId, Long userId) {
+        return tennisMatchRepository.findById(matchId)
+                .map(m -> m.getReferee().getId().equals(userId))
+                .orElse(false);
     }
 }

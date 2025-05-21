@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -15,6 +16,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity(prePostEnabled = true)
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
@@ -51,8 +53,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/matches/create").hasRole("ADMIN")
 
 
-                        .requestMatchers(HttpMethod.GET,  "/api/matches/referee/**").hasRole("REFEREE")
-                        .requestMatchers(HttpMethod.PUT,  "/api/matches/{matchId}/score").hasRole("REFEREE")
+                        .requestMatchers(HttpMethod.GET,  "/api/matches/referee/**").hasAnyRole("REFEREE","ADMIN")
+                        .requestMatchers(HttpMethod.PUT,  "/api/matches/{matchId}/score").hasAnyRole("REFEREE","ADMIN")
 
 
                         .requestMatchers(HttpMethod.POST, "/api/tournaments/{tournamentId}/register").hasRole("PLAYER")

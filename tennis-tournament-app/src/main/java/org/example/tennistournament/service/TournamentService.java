@@ -2,12 +2,14 @@ package org.example.tennistournament.service;
 
 import jakarta.transaction.Transactional;
 import org.example.tennistournament.builder.TournamentBuilder;
+import org.example.tennistournament.model.RegistrationRequest;
 import org.example.tennistournament.model.Role;
 import org.example.tennistournament.model.Tournament;
 import org.example.tennistournament.model.User;
 import org.example.tennistournament.repository.TournamentRepository;
 import org.example.tennistournament.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -22,6 +24,10 @@ public class TournamentService {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private RegistrationRequestService requestService;
+
+    @PreAuthorize("hasRole('ADMIN')")
     public Tournament createTournament(String name,
                                        LocalDate startDate,
                                        LocalDate endDate,
@@ -64,14 +70,14 @@ public class TournamentService {
         return tournamentRepository.save(tournament);
     }
 
-    public Tournament registerPlayer(Long tournamentId, Long playerId) {
+    @PreAuthorize("#playerId == principal.id and hasRole('PLAYER')")    // ← only the player themself
+    public RegistrationRequest registerPlayer(Long tournamentId, Long playerId) {
         Tournament tournament = tournamentRepository.findById(tournamentId)
                 .orElseThrow(() -> new RuntimeException("Tournament not found!"));
 
         if (tournament.isCancelled()) {
             throw new RuntimeException("Tournament is cancelled, no new registrations allowed!");
         }
-
         if (tournament.getRegistrationDeadline() != null
                 && LocalDate.now().isAfter(tournament.getRegistrationDeadline())) {
             throw new RuntimeException("Registration deadline has passed!");
@@ -79,28 +85,18 @@ public class TournamentService {
 
         User player = userRepository.findById(playerId)
                 .orElseThrow(() -> new RuntimeException("User not found!"));
-
         if (player.getRole() != Role.PLAYER) {
             throw new RuntimeException("Only PLAYER role can register for tournaments!");
         }
-
         if (tournament.getPlayers().size() >= tournament.getMaxPlayers()) {
             throw new RuntimeException("Tournament is at max capacity!");
         }
-
         checkTournamentOverlap(tournament, player);
 
-        if(tournament.getStartDate().isAfter(tournament.getEndDate())) {
-            throw new RuntimeException("Tournament start date must be before end date!");
-        }
-
-        if (!tournament.getPlayers().contains(player)) {
-            tournament.getPlayers().add(player);
-            tournamentRepository.save(tournament);
-        }
-
-        return tournament;
+        // NEW: instead of directly mutating the tournament, create a pending request
+        return requestService.createRequest(tournament, player);
     }
+
 
     private void checkTournamentOverlap(Tournament newTournament, User player) {
         List<Tournament> existing = tournamentRepository.findAllByPlayer(player.getId());
@@ -127,8 +123,20 @@ public class TournamentService {
             }
         }
     }
+    @PreAuthorize("isAuthenticated()")
     public List<Tournament> getAllTournaments() {
         return tournamentRepository.findAll();
+    }
+
+    public Tournament save(Tournament tournament) {
+        return tournamentRepository.save(tournament);
+    }
+
+    public boolean isRefereeOfTournament(Long tournamentId, Long userId) {
+        return tournamentRepository.findById(tournamentId)
+                .map(t -> t.getMatches().stream()           // or however you track assignments
+                        .anyMatch(m -> m.getReferee().getId().equals(userId)))
+                .orElse(false);
     }
 
 }

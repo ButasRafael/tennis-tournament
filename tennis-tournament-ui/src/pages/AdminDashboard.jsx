@@ -65,6 +65,16 @@ function AdminDashboard() {
                         Create Match
                     </Button>
                 </Grid>
+                <Grid item xs={12} sm={6} md={4}>
+                    <Button
+                        variant="outlined"
+                        fullWidth
+                        startIcon={<GroupIcon />}
+                        onClick={() => navigate('/admin/requests')}
+                        >
+                            Registration-Requests
+                    </Button>
+                </Grid>
             </Grid>
         </Container>
     );

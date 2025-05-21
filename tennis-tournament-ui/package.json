@@ -16,7 +16,7 @@
     "axios": "^1.8.4",
     "bootstrap": "^5.3.5",
     "bootswatch": "^5.3.5",
-    "framer-motion": "^12.6.3",
+    "framer-motion": "^12.12.1",
     "jwt-decode": "^4.0.0",
     "react": "^19.1.0",
     "react-bootstrap": "^2.10.9",

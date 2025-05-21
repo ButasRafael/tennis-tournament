@@ -6,6 +6,7 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
 
 function RefereeDashboard() {
     const navigate = useNavigate();
@@ -46,7 +47,21 @@ function RefereeDashboard() {
                                 Manage Score
                             </Button>
                         </Grid>
+                            <Grid
+                                item
+                                xs={12} sm={6}
+                                sx={{ mt: 2, mx: 'auto' }}
+                            >
+                                <Button
+                                    variant="outlined"
+                                    fullWidth
+                                    onClick={() => navigate('/referee/filter-players')}
+                                    startIcon={<SearchIcon />}
+                                    >
+                                      Filter Players
+                                </Button>
                     </Grid>
+                </Grid>
                 </CardContent>
             </Card>
         </Container>

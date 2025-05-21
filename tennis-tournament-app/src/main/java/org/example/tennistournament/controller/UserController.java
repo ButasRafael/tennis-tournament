@@ -23,6 +23,7 @@ public class UserController {
     private UserService userService;
 
     @GetMapping("/{id}")
+    @PreAuthorize("#id == principal.id or hasRole('ADMIN')")   // ← only self or admin
     @Operation(summary = "Get user by ID", description = "Retrieves a user by their unique ID")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User found"),
@@ -40,6 +41,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("#id == principal.id or hasRole('ADMIN')")   // ← only self or admin
     @Operation(summary = "Update user", description = "Updates user information like username, email, and/or password")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User updated successfully"),

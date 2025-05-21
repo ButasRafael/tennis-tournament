@@ -14,11 +14,13 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Map;
 
+import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -145,12 +147,14 @@ public class TennisTournamentApplicationTests {
                         .header("Authorization", "Bearer " + playerToken))
                 .andExpect(status().isOk());
 
+        // second from same player must be rejected
         mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
                         .param("playerId", playerId.toString())
                         .header("Authorization", "Bearer " + playerToken))
                 .andExpect(status().isBadRequest())
-                .andExpect(content().string("Tournament is at max capacity!"));
+                .andExpect(content().string("Request already exists for this player in this tournament"));
     }
+
 
     @Test
     void testTournamentRegistration_DeadlinePassed() throws Exception {
@@ -241,8 +245,7 @@ public class TennisTournamentApplicationTests {
                         .param("maxPlayers", "32")
                         .param("minPlayers", "2")
                         .header("Authorization", "Bearer " + playerToken))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string("Only ADMIN can create tournaments!"));
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -264,9 +267,9 @@ public class TennisTournamentApplicationTests {
                         .param("startTime", LocalDateTime.now().plusDays(2).toString())
                         .param("endTime", LocalDateTime.now().plusDays(2).plusHours(2).toString())
                         .header("Authorization", "Bearer " + playerToken))
-                .andExpect(status().isBadRequest())
-                .andExpect(content().string("Only ADMIN can create matches!"));
+                .andExpect(status().isForbidden());
     }
+
 
     @Test
     void testCreateMatch_Success_And_RefereeError() throws Exception {
@@ -301,20 +304,35 @@ public class TennisTournamentApplicationTests {
                 .build();
         t = tournamentRepository.save(t);
 
-        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+        // register and approve first player
+        MvcResult req1 = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
                         .param("playerId", playerId.toString())
                         .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> m1 = objectMapper.readValue(req1.getResponse().getContentAsString(), new TypeReference<>() {});
+        Integer req1Id = (Integer) m1.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req1Id + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
 
+        // register and approve second player
         var secondPlayerReg = registerUser("p2", "p2@xyz.com", "passabc", Role.PLAYER);
         Long secondPlayerId = secondPlayerReg.userId();
         String secondPlayerToken = secondPlayerReg.token();
 
-        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+        MvcResult req2 = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
                         .param("playerId", secondPlayerId.toString())
                         .header("Authorization", "Bearer " + secondPlayerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> m2 = objectMapper.readValue(req2.getResponse().getContentAsString(), new TypeReference<>() {});
+        Integer req2Id = (Integer) m2.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req2Id + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
 
+        // now create the first match successfully
         mockMvc.perform(post("/api/matches/create")
                         .param("currentUserId", adminId.toString())
                         .param("tournamentId", t.getId().toString())
@@ -326,6 +344,7 @@ public class TennisTournamentApplicationTests {
                         .header("Authorization", "Bearer " + adminToken))
                 .andExpect(status().isOk());
 
+        // overlapping should now fail
         mockMvc.perform(post("/api/matches/create")
                         .param("currentUserId", adminId.toString())
                         .param("tournamentId", t.getId().toString())
@@ -502,4 +521,575 @@ public class TennisTournamentApplicationTests {
                         .header("Authorization", "Bearer " + oldAccessToken))
                 .andExpect(status().isForbidden());
     }
+
+    @Test
+    void testListAllRegistrationRequests() throws Exception {
+        Tournament t = TournamentBuilder.builder()
+                .name("Req Cup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // First request by existing player
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk());
+
+        // Second request by a new player
+        var reg2 = registerUser("p2", "p2@xyz.com", "pass123", Role.PLAYER);
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", reg2.userId().toString())
+                        .header("Authorization", "Bearer " + reg2.token()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/registration-requests")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    @Test
+    void testListPendingRegistrationRequests() throws Exception {
+        Tournament t = TournamentBuilder.builder()
+                .name("Req Cup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        var reg2 = registerUser("p2", "p2@xyz.com", "pass123", Role.PLAYER);
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", reg2.userId().toString())
+                        .header("Authorization", "Bearer " + reg2.token()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/registration-requests")
+                        .param("status", "PENDING")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].status").value("PENDING"));
+    }
+
+    @Test
+    void testApproveRegistrationRequest() throws Exception {
+        Tournament t = TournamentBuilder.builder()
+                .name("Req Cup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // Create a pending request
+        MvcResult create = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        String body = create.getResponse().getContentAsString();
+        Map<String, Object> map = objectMapper.readValue(body, new TypeReference<>() {});
+        Integer reqId = (Integer) map.get("id");
+
+        mockMvc.perform(post("/api/admin/registration-requests/" + reqId + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("APPROVED"));
+    }
+
+    @Test
+    void testDenyRegistrationRequest() throws Exception {
+        Tournament t = TournamentBuilder.builder()
+                .name("Req Cup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        MvcResult create = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        String body = create.getResponse().getContentAsString();
+        Map<String, Object> map = objectMapper.readValue(body, new TypeReference<>() {});
+        Integer reqId = (Integer) map.get("id");
+
+        mockMvc.perform(post("/api/admin/registration-requests/" + reqId + "/deny")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DENIED"));
+    }
+
+    // --- New tests for referee filtering ---
+
+    @Test
+    void testRefereeFilterPlayersByUsername() throws Exception {
+        var alice = registerUser("alice", "alice@xyz.com", "pass123", Role.PLAYER);
+        var bob   = registerUser("bob",   "bob@xyz.com",   "pass123", Role.PLAYER);
+
+        mockMvc.perform(get("/api/referee/players")
+                        .param("username", "ali")
+                        .header("Authorization", "Bearer " + refToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].username").value("alice"));
+    }
+
+    @Test
+    void testRefereeFilterPlayersByTournament() throws Exception {
+        // 1) create tournament
+        Tournament t = TournamentBuilder.builder()
+                .name("Filter Cup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // 2) register & approve first player
+        MvcResult r1 = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String, Object> m1 = objectMapper.readValue(
+                r1.getResponse().getContentAsString(),
+                new TypeReference<Map<String, Object>>() {});
+        Integer req1 = (Integer) m1.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // 3) register & approve second player
+        RegisteredUser p2 = registerUser("p2", "p2@xyz.com", "pass123", Role.PLAYER);
+        MvcResult r2 = mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", p2.userId().toString())
+                        .header("Authorization", "Bearer " + p2.token()))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String, Object> m2 = objectMapper.readValue(
+                r2.getResponse().getContentAsString(),
+                new TypeReference<Map<String, Object>>() {});
+        Integer req2 = (Integer) m2.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req2 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // 4) assign our ref to that tournament by creating a dummy match
+        LocalDateTime start = t.getStartDate().atTime(9, 0);
+        LocalDateTime end   = t.getStartDate().atTime(10, 0);
+        mockMvc.perform(post("/api/matches/create")
+                        .param("tournamentId", t.getId().toString())
+                        .param("player1Id", playerId.toString())
+                        .param("player2Id", p2.userId().toString())
+                        .param("refereeId", refereeId.toString())
+                        .param("startTime", start.toString())
+                        .param("endTime",   end.toString())
+                        .param("currentUserId", adminId.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // 5) now as the assigned referee, filtering players in that tournament must succeed
+        mockMvc.perform(get("/api/referee/players")
+                        .param("tournamentId", t.getId().toString())
+                        .header("Authorization", "Bearer " + refToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    // --- UserController: getUser and updateUser ownership checks ---
+
+    @Test
+    void testGetOwnUser_Success() throws Exception {
+        mockMvc.perform(get("/api/users/" + playerId)
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(playerId));
+    }
+
+    @Test
+    void testGetOtherUser_Forbidden() throws Exception {
+        // Player tries to fetch Admin’s info
+        mockMvc.perform(get("/api/users/" + adminId)
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testGetUserByAdmin_Success() throws Exception {
+        mockMvc.perform(get("/api/users/" + playerId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(playerId));
+    }
+
+    @Test
+    void testUpdateOtherUser_Forbidden() throws Exception {
+        mockMvc.perform(put("/api/users/" + adminId)
+                        .param("newUsername", "foo")
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    // --- AdminController: getAllUsers ownership checks ---
+
+    @Test
+    void testGetAllUsers_NonAdminForbidden() throws Exception {
+        mockMvc.perform(get("/api/admin/users")
+                        .param("currentUserId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testGetAllUsers_AdminSuccess() throws Exception {
+        mockMvc.perform(get("/api/admin/users")
+                        .param("currentUserId", adminId.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+    }
+
+    // --- TournamentController.registerPlayer ownership checks ---
+
+    @Test
+    void testTournamentRegistration_OtherPlayer_Forbidden() throws Exception {
+        var p2 = registerUser("p2", "p2@xyz.com", "pass123", Role.PLAYER);
+        Tournament t = TournamentBuilder.builder()
+                .name("X")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // player1 tries to register player2
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", p2.userId().toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testTournamentRegistration_Admin_Forbidden() throws Exception {
+        Tournament t = TournamentBuilder.builder()
+                .name("Y")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(10)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // admin tries to register a player
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+    }
+
+    // --- TennisMatchController: getMatchesByTournament and getMatchesByReferee ---
+
+    @Test
+    void testGetMatchesByTournament_Participant_Success() throws Exception {
+        // 1) create tournament
+        Tournament tour = TournamentBuilder.builder()
+                .name("Cup1")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(2)
+                .minPlayers(1)
+                .build();
+        tour = tournamentRepository.save(tour);
+
+        // 2) register & approve player1
+        MvcResult r1 = mockMvc.perform(post("/api/tournaments/" + tour.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> m1 = objectMapper.readValue(
+                r1.getResponse().getContentAsString(),
+                new TypeReference<>() {});
+        Integer req1 = (Integer) m1.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // 3) register & approve player2
+        RegisteredUser p2 = registerUser("p2", "p2@xyz.com", "pass123", Role.PLAYER);
+        MvcResult r2 = mockMvc.perform(post("/api/tournaments/" + tour.getId() + "/register")
+                        .param("playerId", p2.userId().toString())
+                        .header("Authorization", "Bearer " + p2.token()))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> m2 = objectMapper.readValue(
+                r2.getResponse().getContentAsString(),
+                new TypeReference<>() {});
+        Integer req2 = (Integer) m2.get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req2 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // 4) create a valid match
+        LocalDateTime start = tour.getStartDate().atTime(9, 0);
+        LocalDateTime end   = tour.getStartDate().atTime(10, 0);
+        MvcResult matchR = mockMvc.perform(post("/api/matches/create")
+                        .param("currentUserId", adminId.toString())
+                        .param("tournamentId", tour.getId().toString())
+                        .param("player1Id", playerId.toString())
+                        .param("player2Id", p2.userId().toString())
+                        .param("refereeId", refereeId.toString())
+                        .param("startTime", start.toString())
+                        .param("endTime", end.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> mm = objectMapper.readValue(
+                matchR.getResponse().getContentAsString(),
+                new TypeReference<>() {});
+        Long matchId = Long.valueOf((Integer) mm.get("id"));
+
+        // 5) now participant can list matches by tournament
+        mockMvc.perform(get("/api/matches/tournament/" + tour.getId())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)));
+    }
+
+
+    @Test
+    void testGetMatchesByTournament_NonParticipant_Forbidden() throws Exception {
+        // setup same as above
+        Tournament tour = TournamentBuilder.builder()
+                .name("Cup2")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(1)
+                .minPlayers(1)
+                .build();
+        tour = tournamentRepository.save(tour);
+        // no registration for p2
+        var p2 = registerUser("p2x","p2x@x.com","pass123",Role.PLAYER);
+
+        mockMvc.perform(get("/api/matches/tournament/" + tour.getId())
+                        .header("Authorization", "Bearer " + p2.token()))
+                .andExpect(status().isForbidden());
+    }
+
+
+    @Test
+    void testGetMatchesByTournament_Admin_Success() throws Exception {
+        // admin can list even with no matches
+        Tournament tour = TournamentBuilder.builder()
+                .name("Cup3")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(1)
+                .minPlayers(1)
+                .build();
+        tour = tournamentRepository.save(tour);
+
+        mockMvc.perform(get("/api/matches/tournament/" + tour.getId())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void testGetMatchesByReferee_Self_Success() throws Exception {
+        mockMvc.perform(get("/api/matches/referee/" + refereeId)
+                        .header("Authorization", "Bearer " + refToken))
+                .andExpect(status().isOk());
+    }
+
+
+    @Test
+    void testGetMatchesByReferee_OtherForbidden() throws Exception {
+        // refereeId is from @BeforeEach
+        mockMvc.perform(get("/api/matches/referee/" + refereeId)
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+
+    @Test
+    void testGetMatchesByReferee_Admin_Success() throws Exception {
+        mockMvc.perform(get("/api/matches/referee/" + refereeId)
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+    }
+
+    // --- TennisMatchController.updateMatchScore security checks ---
+
+    @Test
+    void testUpdateScore_ByPlayer_Forbidden() throws Exception {
+        // assume matchId was created as above; reuse creation logic or extract into @BeforeEach helper
+        Long matchId = createOneMatchAndReturnId();
+        mockMvc.perform(put("/api/matches/" + matchId + "/score")
+                        .param("newScore", "6-3,6-4")
+                        .param("currentUserId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testUpdateScore_ByOtherReferee_Forbidden() throws Exception {
+        Long matchId = createOneMatchAndReturnId();
+        RegisteredUser r2 = registerUser("r2", "r2@xyz.com", "pass123", Role.REFEREE);
+        mockMvc.perform(put("/api/matches/" + matchId + "/score")
+                        .param("newScore", "6-3,6-4")
+                        .param("currentUserId", r2.userId().toString())
+                        .header("Authorization", "Bearer " + r2.token()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testUpdateScore_ByAdmin_Success() throws Exception {
+        Long matchId = createOneMatchAndReturnId();
+        mockMvc.perform(put("/api/matches/" + matchId + "/score")
+                        .param("newScore", "6-3,6-4")
+                        .param("currentUserId", adminId.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.score").value("6-3,6-4"));
+    }
+
+    // --- RefereeController.filterPlayers security checks ---
+
+    @Test
+    void testRefereeRoute_PlayerForbidden() throws Exception {
+        mockMvc.perform(get("/api/referee/players")
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testRefereeRoute_AdminForbidden() throws Exception {
+        mockMvc.perform(get("/api/referee/players")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void testRefereeRoute_TournamentNotAssigned_Forbidden() throws Exception {
+        // create a tournament but do _not_ assign any match/referee to it
+        Tournament t2 = TournamentBuilder.builder()
+                .name("NoRefCup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(2)
+                .minPlayers(1)
+                .build();
+        t2 = tournamentRepository.save(t2);
+
+        mockMvc.perform(get("/api/referee/players")
+                        .param("tournamentId", t2.getId().toString())
+                        .header("Authorization", "Bearer " + refToken))
+                .andExpect(status().isForbidden());
+    }
+
+    private Long createOneMatchAndReturnId() throws Exception {
+        Tournament tour = TournamentBuilder.builder()
+                .name("MatchCup")
+                .startDate(LocalDate.now().plusDays(1))
+                .endDate(LocalDate.now().plusDays(2))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(2)
+                .minPlayers(1)
+                .build();
+        tour = tournamentRepository.save(tour);
+
+        // register & approve both players (playerId and p2)
+        MvcResult r1 = mockMvc.perform(post("/api/tournaments/" + tour.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk()).andReturn();
+        Integer req1 = (Integer) objectMapper.readValue(r1.getResponse().getContentAsString(),
+                new TypeReference<Map<String,Object>>(){}).get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req1 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        RegisteredUser p2 = registerUser("p2m","p2m@x.com","pass123",Role.PLAYER);
+        MvcResult r2 = mockMvc.perform(post("/api/tournaments/" + tour.getId() + "/register")
+                        .param("playerId", p2.userId().toString())
+                        .header("Authorization", "Bearer " + p2.token()))
+                .andExpect(status().isOk()).andReturn();
+        Integer req2 = (Integer) objectMapper.readValue(r2.getResponse().getContentAsString(),
+                new TypeReference<Map<String,Object>>(){}).get("id");
+        mockMvc.perform(post("/api/admin/registration-requests/" + req2 + "/approve")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        // finally create the match
+        LocalDateTime s = tour.getStartDate().atTime(9,0);
+        LocalDateTime e = tour.getStartDate().atTime(10,0);
+        MvcResult mres = mockMvc.perform(post("/api/matches/create")
+                        .param("currentUserId", adminId.toString())
+                        .param("tournamentId", tour.getId().toString())
+                        .param("player1Id", playerId.toString())
+                        .param("player2Id", p2.userId().toString())
+                        .param("refereeId", refereeId.toString())
+                        .param("startTime", s.toString())
+                        .param("endTime", e.toString())
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        Map<String,Object> mm = objectMapper.readValue(
+                mres.getResponse().getContentAsString(),
+                new TypeReference<>() {});
+        return Long.valueOf((Integer) mm.get("id"));
+    }
+
+    @Test
+    void testTournamentRegistration_DuplicateRequest() throws Exception {
+        // 1) create tournament
+        Tournament t = TournamentBuilder.builder()
+                .name("Duplicate Cup")
+                .startDate(LocalDate.now().plusDays(2))
+                .endDate(LocalDate.now().plusDays(4))
+                .registrationDeadline(LocalDate.now().plusDays(1))
+                .maxPlayers(5)
+                .minPlayers(1)
+                .build();
+        t = tournamentRepository.save(t);
+
+        // 2) first registration attempt
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isOk());
+
+        // 3) second (duplicate) registration attempt should be rejected
+        mockMvc.perform(post("/api/tournaments/" + t.getId() + "/register")
+                        .param("playerId", playerId.toString())
+                        .header("Authorization", "Bearer " + playerToken))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string("Request already exists for this player in this tournament"));
+    }
+
 }
+
