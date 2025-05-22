@@ -19,47 +19,59 @@ import {
     Snackbar,
     Alert
 } from '@mui/material';
-import axiosInstance from '../api/axiosConfig';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import axiosInstance from '../api/axiosConfig';
 
-function MatchesSchedulePage() {
+export default function MatchesSchedulePage() {
     const [tournaments, setTournaments] = useState([]);
     const [selectedTournament, setSelectedTournament] = useState('');
     const [matches, setMatches] = useState([]);
     const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'error' });
-    const storedUser = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')) : null;
-    const userId = storedUser ? Number(storedUser.id) : null;
+    const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
+    const userId = storedUser?.id;
 
+    // new: pull down **only approved** tournaments for this player
     useEffect(() => {
-        axiosInstance.get('/tournaments/all')
-            .then(response => {
-                setTournaments(response.data);
-            })
-            .catch(error => {
-                setSnackbar({ open: true, message: 'Error fetching tournaments: ' + (error.response?.data || error.message), severity: 'error' });
-            });
+        const stored = JSON.parse(localStorage.getItem('user') || 'null');
+        const myId = stored?.id;
+        if (!myId) return;
+
+        axiosInstance.get('/tournaments/approved', { params: { playerId: myId } })
+            .then(res => setTournaments(res.data))
+            .catch(err => setSnackbar({
+                open: true,
+                message: 'Error fetching tournaments: ' + (err.response?.data || err.message),
+                severity: 'error'
+            }));
     }, []);
+
 
     const fetchMatches = () => {
         if (!selectedTournament) {
             setSnackbar({ open: true, message: 'Please select a tournament.', severity: 'error' });
             return;
         }
+
         axiosInstance.get(`/matches/tournament/${selectedTournament}`)
-            .then(response => {
-                const playerMatches = response.data.filter(match =>
-                    match.player1 === userId || match.player2 === userId
+            .then(res => {
+                // filter by your own player-id fields
+                const mine = res.data.filter(m =>
+                    m.player1Id === userId || m.player2Id === userId
                 );
-                setMatches(playerMatches);
+                setMatches(mine);
             })
-            .catch(error => {
-                setSnackbar({ open: true, message: 'Error fetching matches: ' + (error.response?.data || error.message), severity: 'error' });
-            });
+            .catch(err =>
+                setSnackbar({
+                    open: true,
+                    message: 'Error fetching matches: ' + (err.response?.data || err.message),
+                    severity: 'error'
+                })
+            );
     };
 
-    const handleCloseSnackbar = (event, reason) => {
+    const handleCloseSnackbar = (_, reason) => {
         if (reason === 'clickaway') return;
-        setSnackbar({ ...snackbar, open: false });
+        setSnackbar(s => ({ ...s, open: false }));
     };
 
     return (
@@ -69,38 +81,46 @@ function MatchesSchedulePage() {
                     <Typography variant="h5" gutterBottom>
                         Matches Schedule & Scores
                     </Typography>
+
                     <FormControl fullWidth margin="normal">
                         <InputLabel>Select Tournament</InputLabel>
                         <Select
                             value={selectedTournament}
-                            onChange={(e) => setSelectedTournament(e.target.value)}
+                            onChange={e => setSelectedTournament(e.target.value)}
                             label="Select Tournament"
                         >
                             <MenuItem value="">
                                 <em>-- Select Tournament --</em>
                             </MenuItem>
-                            {tournaments.map((t) => (
-                                <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                            {tournaments.map(t => (
+                                <MenuItem key={t.id} value={t.id}>
+                                    {t.name}
+                                </MenuItem>
                             ))}
                         </Select>
                     </FormControl>
+
                     <Button
                         variant="contained"
                         color="primary"
-                        onClick={fetchMatches}
                         startIcon={<VisibilityIcon />}
                         sx={{ mt: 2 }}
+                        onClick={fetchMatches}
                     >
                         View Schedule
                     </Button>
+
                     {matches.length === 0 ? (
-                        <Typography variant="body1" sx={{ mt: 2 }}>No matches found.</Typography>
+                        <Typography variant="body1" sx={{ mt: 2 }}>
+                            No matches found.
+                        </Typography>
                     ) : (
                         <TableContainer sx={{ mt: 2 }}>
                             <Table>
                                 <TableHead>
                                     <TableRow>
                                         <TableCell>Match ID</TableCell>
+                                        <TableCell>Tournament</TableCell>
                                         <TableCell>Player 1</TableCell>
                                         <TableCell>Player 2</TableCell>
                                         <TableCell>Score</TableCell>
@@ -109,14 +129,15 @@ function MatchesSchedulePage() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {matches.map(match => (
-                                        <TableRow key={match.id}>
-                                            <TableCell>{match.id}</TableCell>
-                                            <TableCell>{match.player1}</TableCell>
-                                            <TableCell>{match.player2}</TableCell>
-                                            <TableCell>{match.score || 'N/A'}</TableCell>
-                                            <TableCell>{match.startTime}</TableCell>
-                                            <TableCell>{match.endTime}</TableCell>
+                                    {matches.map(m => (
+                                        <TableRow key={m.id}>
+                                            <TableCell>{m.id}</TableCell>
+                                            <TableCell>{m.tournamentName}</TableCell>
+                                            <TableCell>{m.player1Username}</TableCell>
+                                            <TableCell>{m.player2Username}</TableCell>
+                                            <TableCell>{m.score || 'N/A'}</TableCell>
+                                            <TableCell>{m.startTime}</TableCell>
+                                            <TableCell>{m.endTime}</TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -125,6 +146,7 @@ function MatchesSchedulePage() {
                     )}
                 </CardContent>
             </Card>
+
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={6000}
@@ -138,5 +160,3 @@ function MatchesSchedulePage() {
         </Container>
     );
 }
-
-export default MatchesSchedulePage;

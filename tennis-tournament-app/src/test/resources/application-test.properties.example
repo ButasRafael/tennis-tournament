@@ -1,0 +1,6 @@
+
+spring.datasource.url=jdbc:mysql://localhost:3306/your_test_db
+spring.datasource.username=your_test_user
+spring.datasource.password=your_test_pass
+
+spring.jpa.hibernate.ddl-auto=create-drop

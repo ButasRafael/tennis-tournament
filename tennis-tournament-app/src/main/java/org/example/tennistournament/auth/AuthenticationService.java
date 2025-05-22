@@ -1,17 +1,20 @@
 package org.example.tennistournament.auth;
 
-import org.example.tennistournament.model.User;
+import jakarta.servlet.http.HttpServletRequest;
 import org.example.tennistournament.model.Token;
 import org.example.tennistournament.model.TokenType;
+import org.example.tennistournament.model.User;
 import org.example.tennistournament.model.Role;
-import org.example.tennistournament.repository.UserRepository;
 import org.example.tennistournament.repository.TokenRepository;
+import org.example.tennistournament.repository.UserRepository;
 import org.example.tennistournament.security.JwtService;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.server.ResponseStatusException;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,16 +42,16 @@ public class AuthenticationService {
 
     public Map<String, String> register(String username, String email, String password, Role role) {
         if (userRepository.existsByUsername(username)) {
-            throw new RuntimeException("Username already exists!");
+            throw new IllegalArgumentException("Username already exists!");
         }
         if (userRepository.existsByEmail(email)) {
-            throw new RuntimeException("Email already exists!");
+            throw new IllegalArgumentException("Email already exists!");
         }
-        if (password == null || password.trim().isEmpty()) {
-            throw new RuntimeException("Password cannot be empty!");
+        if (password == null || password.isBlank()) {
+            throw new IllegalArgumentException("Password cannot be empty!");
         }
         if (password.length() < 6) {
-            throw new RuntimeException("Password must be at least 6 characters long!");
+            throw new IllegalArgumentException("Password must be at least 6 characters long!");
         }
 
         User user = new User();
@@ -56,23 +59,10 @@ public class AuthenticationService {
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(password));
         user.setRole(role);
-        User savedUser = userRepository.save(user);
+        user = userRepository.save(user);
 
-        String jwtToken = jwtService.generateToken(savedUser);
-        String refreshToken = jwtService.generateRefreshToken(savedUser);
-        saveAccessToken(savedUser, jwtToken);
-        saveRefreshToken(savedUser, refreshToken);
-
-        Map<String, String> response = new HashMap<>();
-        response.put("accessToken", jwtToken);
-        response.put("refreshToken", refreshToken);
-        response.put("role", savedUser.getRole().name());
-        response.put("username", savedUser.getUsername());
-        response.put("email", savedUser.getEmail());
-        response.put("id", String.valueOf(savedUser.getId()));
-        response.put("version", String.valueOf(savedUser.getVersion()));
-
-        return response;
+        revokeAllUserTokens(user);
+        return generateAndSaveTokens(user);
     }
 
     public Map<String, String> authenticate(String username, String password) {
@@ -80,90 +70,68 @@ public class AuthenticationService {
                 new UsernamePasswordAuthenticationToken(username, password)
         );
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-        String jwtToken = jwtService.generateToken(user);
-        String refreshToken = jwtService.generateRefreshToken(user);
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
         revokeAllUserTokens(user);
-        saveAccessToken(user, jwtToken);
-        saveRefreshToken(user, refreshToken);
-
-        Map<String, String> response = new HashMap<>();
-        response.put("accessToken", jwtToken);
-        response.put("refreshToken", refreshToken);
-        response.put("role", user.getRole().name());
-        response.put("username", user.getUsername());
-        response.put("email", user.getEmail());
-        response.put("id", String.valueOf(user.getId()));
-        response.put("version", String.valueOf(user.getVersion()));
-
-        return response;
+        return generateAndSaveTokens(user);
     }
 
     public Map<String, String> refreshToken(HttpServletRequest request) {
-        final String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new RuntimeException("Refresh token missing or malformed");
+        String header = request.getHeader("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Refresh token missing or malformed");
         }
-
-        String oldRefreshToken = authHeader.substring(7);
-        String username = jwtService.extractUsername(oldRefreshToken);
-
+        String oldRefresh = header.substring(7);
+        String username = jwtService.extractUsername(oldRefresh);
         if (username == null) {
-            throw new RuntimeException("Invalid refresh token: missing subject");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid refresh token: missing subject");
         }
 
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        if (!jwtService.isTokenValid(oldRefreshToken, user)) {
-            throw new RuntimeException("Invalid or expired refresh token");
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+        if (!jwtService.isTokenValid(oldRefresh, user)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired refresh token");
         }
 
-        String newAccessToken = jwtService.generateToken(user);
-        String newRefreshToken = jwtService.generateRefreshToken(user);
-
         revokeAllUserTokens(user);
+        return generateAndSaveTokens(user);
+    }
 
-        saveAccessToken(user, newAccessToken);
-        saveRefreshToken(user, newRefreshToken);
+    // --- helper to mint, persist, and return tokens as a map ---
+    private Map<String, String> generateAndSaveTokens(User user) {
+        String access  = jwtService.generateToken(user);
+        String refresh = jwtService.generateRefreshToken(user);
+
+        saveToken(user, access,  TokenType.ACCESS);
+        saveToken(user, refresh, TokenType.REFRESH);
 
         Map<String, String> response = new HashMap<>();
-        response.put("accessToken", newAccessToken);
-        response.put("refreshToken", newRefreshToken);
+        response.put("accessToken",  access);
+        response.put("refreshToken", refresh);
+        response.put("role",         user.getRole().name());
+        response.put("username",     user.getUsername());
+        response.put("email",        user.getEmail());
+        response.put("id",           String.valueOf(user.getId()));
+        response.put("version",      String.valueOf(user.getVersion()));
         return response;
     }
 
-
-    private void saveAccessToken(User user, String jwtToken) {
-        Token token = new Token();
-        token.setUser(user);
-        token.setToken(jwtToken);
-        token.setTokenType(TokenType.ACCESS);
-        token.setExpired(false);
-        token.setRevoked(false);
-        tokenRepository.save(token);
-    }
-
-    private void saveRefreshToken(User user, String jwtToken) {
-        Token token = new Token();
-        token.setUser(user);
-        token.setToken(jwtToken);
-        token.setTokenType(TokenType.REFRESH);
-        token.setExpired(false);
-        token.setRevoked(false);
-        tokenRepository.save(token);
+    private void saveToken(User user, String jwt, TokenType type) {
+        Token t = new Token();
+        t.setUser(user);
+        t.setToken(jwt);
+        t.setTokenType(type);
+        t.setExpired(false);
+        t.setRevoked(false);
+        tokenRepository.save(t);
     }
 
     private void revokeAllUserTokens(User user) {
-        List<Token> validTokens = tokenRepository.findAllValidTokenByUser(user.getId());
-        if (validTokens == null || validTokens.isEmpty()) {
-            return;
-        }
-        for (Token token : validTokens) {
-            token.setExpired(true);
-            token.setRevoked(true);
-        }
-        tokenRepository.saveAll(validTokens);
+        List<Token> tokens = tokenRepository.findAllValidTokenByUser(user.getId());
+        tokens.forEach(t -> {
+            t.setExpired(true);
+            t.setRevoked(true);
+        });
+        tokenRepository.saveAll(tokens);
     }
 }

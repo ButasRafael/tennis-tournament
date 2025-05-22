@@ -44,8 +44,8 @@ export default function RegistrationRequestsPage() {
                             {reqs.map(r => (
                                 <TableRow key={r.id}>
                                     <TableCell>{r.id}</TableCell>
-                                    <TableCell>{r.player.username}</TableCell>
-                                    <TableCell>{r.tournament.name}</TableCell>
+                                    <TableCell>{r.playerUsername}</TableCell>
+                                    <TableCell>{r.tournamentName}</TableCell>
                                     <TableCell>{new Date(r.createdAt).toLocaleString()}</TableCell>
                                     <TableCell>
                                         <Button size="small" onClick={()=>handle(r.id,true)}>Approve</Button>

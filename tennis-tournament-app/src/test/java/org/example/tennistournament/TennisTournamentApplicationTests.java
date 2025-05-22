@@ -74,7 +74,8 @@ public class TennisTournamentApplicationTests {
                 .andReturn();
         String responseBody = result.getResponse().getContentAsString();
         Map<String, Object> jsonMap = objectMapper.readValue(responseBody, new TypeReference<>() {});
-        Long userId = Long.valueOf((String) jsonMap.get("id"));
+        Number idNum = (Number) jsonMap.get("id");
+        Long userId = idNum.longValue();
         String token = (String) jsonMap.get("accessToken");
         return new RegisteredUser(userId, token);
     }

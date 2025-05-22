@@ -42,7 +42,11 @@ function ManageScorePage() {
         axiosInstance.get(`/matches/referee/${storedUser.id}`)
             .then(response => setMatches(response.data))
             .catch(error =>
-                setSnackbar({ open: true, message: 'Error fetching matches: ' + (error.response?.data || error.message), severity: 'error' })
+                setSnackbar({
+                    open: true,
+                    message: 'Error fetching matches: ' + (error.response?.data || error.message),
+                    severity: 'error'
+                })
             );
     };
 
@@ -68,7 +72,11 @@ function ManageScorePage() {
                 handleDialogClose();
             })
             .catch(error => {
-                setSnackbar({ open: true, message: 'Error updating score: ' + (error.response?.data || error.message), severity: 'error' });
+                setSnackbar({
+                    open: true,
+                    message: 'Error updating score: ' + (error.response?.data || error.message),
+                    severity: 'error'
+                });
             });
     };
 
@@ -84,6 +92,7 @@ function ManageScorePage() {
                     <Typography variant="h5" gutterBottom>
                         Manage Match Scores
                     </Typography>
+
                     {matches.length === 0 ? (
                         <Typography>No matches assigned to you.</Typography>
                     ) : (
@@ -103,12 +112,16 @@ function ManageScorePage() {
                                     {matches.map(match => (
                                         <TableRow key={match.id}>
                                             <TableCell>{match.id}</TableCell>
-                                            <TableCell>{match.tournament ? match.tournament.name : 'N/A'}</TableCell>
-                                            <TableCell>{match.player1 ? match.player1.username : 'N/A'}</TableCell>
-                                            <TableCell>{match.player2 ? match.player2.username : 'N/A'}</TableCell>
+                                            <TableCell>{match.tournamentName || 'N/A'}</TableCell>
+                                            <TableCell>{match.player1Username || 'N/A'}</TableCell>
+                                            <TableCell>{match.player2Username || 'N/A'}</TableCell>
                                             <TableCell>{match.score || 'N/A'}</TableCell>
                                             <TableCell>
-                                                <Button variant="outlined" onClick={() => handleUpdateClick(match)} startIcon={<EditIcon />}>
+                                                <Button
+                                                    variant="outlined"
+                                                    onClick={() => handleUpdateClick(match)}
+                                                    startIcon={<EditIcon />}
+                                                >
                                                     Update Score
                                                 </Button>
                                             </TableCell>
@@ -120,6 +133,7 @@ function ManageScorePage() {
                     )}
                 </CardContent>
             </Card>
+
             <Dialog open={dialogOpen} onClose={handleDialogClose}>
                 <DialogTitle>Update Score</DialogTitle>
                 <DialogContent>
@@ -144,6 +158,7 @@ function ManageScorePage() {
                     </Button>
                 </DialogActions>
             </Dialog>
+
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={6000}

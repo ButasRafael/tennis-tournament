@@ -1,17 +1,34 @@
 // src/pages/OwnProgramPage.jsx
 import React, { useState, useEffect } from 'react';
-import { Container, Card, CardContent, Typography, TableContainer, Table, TableHead, TableRow, TableCell, TableBody } from '@mui/material';
+import {
+    Container,
+    Card,
+    CardContent,
+    Typography,
+    TableContainer,
+    Table,
+    TableHead,
+    TableRow,
+    TableCell,
+    TableBody
+} from '@mui/material';
 import axiosInstance from '../api/axiosConfig';
 
-function OwnProgramPage() {
+export default function OwnProgramPage() {
     const [matches, setMatches] = useState([]);
-    const storedUser = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')) : null;
+    const storedUser = JSON.parse(localStorage.getItem('user') || 'null');
 
     useEffect(() => {
-        if (storedUser && storedUser.role.toUpperCase() === 'REFEREE') {
-            axiosInstance.get(`/matches/referee/${storedUser.id}`)
-                .then(response => setMatches(response.data))
-                .catch(error => alert('Error fetching your program: ' + (error.response?.data || error.message)));
+        if (storedUser?.role === 'REFEREE') {
+            axiosInstance
+                .get(`/matches/referee/${storedUser.id}`)
+                .then(res => setMatches(res.data))
+                .catch(err =>
+                    alert(
+                        'Error fetching your program: ' +
+                        (err.response?.data || err.message)
+                    )
+                );
         }
     }, [storedUser]);
 
@@ -22,6 +39,7 @@ function OwnProgramPage() {
                     <Typography variant="h5" gutterBottom>
                         Your Referee Program
                     </Typography>
+
                     {matches.length === 0 ? (
                         <Typography>No matches assigned to you.</Typography>
                     ) : (
@@ -39,15 +57,15 @@ function OwnProgramPage() {
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {matches.map(match => (
-                                        <TableRow key={match.id}>
-                                            <TableCell>{match.id}</TableCell>
-                                            <TableCell>{match.tournament ? match.tournament.name : 'N/A'}</TableCell>
-                                            <TableCell>{match.player1 ? match.player1.username : 'N/A'}</TableCell>
-                                            <TableCell>{match.player2 ? match.player2.username : 'N/A'}</TableCell>
-                                            <TableCell>{match.score || 'N/A'}</TableCell>
-                                            <TableCell>{match.startTime}</TableCell>
-                                            <TableCell>{match.endTime}</TableCell>
+                                    {matches.map(m => (
+                                        <TableRow key={m.id}>
+                                            <TableCell>{m.id}</TableCell>
+                                            <TableCell>{m.tournamentName}</TableCell>
+                                            <TableCell>{m.player1Username}</TableCell>
+                                            <TableCell>{m.player2Username}</TableCell>
+                                            <TableCell>{m.score || 'N/A'}</TableCell>
+                                            <TableCell>{m.startTime}</TableCell>
+                                            <TableCell>{m.endTime}</TableCell>
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -59,5 +77,3 @@ function OwnProgramPage() {
         </Container>
     );
 }
-
-export default OwnProgramPage;
